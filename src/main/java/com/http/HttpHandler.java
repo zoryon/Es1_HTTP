@@ -1,6 +1,7 @@
 package com.http;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
@@ -19,7 +20,7 @@ public class HttpHandler extends Thread {
     String resource;
     String version;
     String responseHeader;
-    String responseBody;
+    byte[] responseBody;
 
     public HttpHandler(Socket socket) {
         this.socket = socket;
@@ -50,9 +51,9 @@ public class HttpHandler extends Thread {
 
             out.writeBytes("HTTP/1.1 "+ responseHeader + System.lineSeparator());
             out.writeBytes("Content-Type: " + getContentType(file) + System.lineSeparator());
-            out.writeBytes("Content-Length: " + responseBody.length() + System.lineSeparator());
+            out.writeBytes("Content-Length: " + responseBody.length + System.lineSeparator());
             out.writeBytes(System.lineSeparator());
-            out.writeBytes(responseBody);
+            out.write(responseBody);
 
             // closing resources
             socket.close();
@@ -62,7 +63,7 @@ public class HttpHandler extends Thread {
     }
 
     public File getFile(String resource) {
-        String basePath = "htdocs";
+        String basePath = "htdocs/chartjs";
 
         return new File(
             basePath +
@@ -73,21 +74,23 @@ public class HttpHandler extends Thread {
         );
     }
 
-    public String getFileStream(File file) throws IOException {
-        if (file == null || !file.exists() || file.isDirectory()) return "<html><body><h1>404 Not Found</h1></body></html>";;
-
-        InputStream input = new FileInputStream(file);
-        byte[] buffer = new byte[8192];
-        
-        int bytesRead;
-        StringBuilder responseContent = new StringBuilder();
-        while ((bytesRead = input.read(buffer)) != -1) {
-            responseContent.append(new String(buffer, 0, bytesRead));
-        }
-
-        input.close();
-        return responseContent.toString();
+    public byte[] getFileStream(File file) throws IOException {
+    if (file == null || !file.exists() || file.isDirectory()) {
+        return "<html><body><h1>404 Not Found</h1></body></html>".getBytes();
     }
+
+    InputStream input = new FileInputStream(file);
+    byte[] buffer = new byte[8192];
+    int bytesRead;
+    ByteArrayOutputStream responseContent = new ByteArrayOutputStream();
+    while ((bytesRead = input.read(buffer)) != -1) {
+        responseContent.write(buffer, 0, bytesRead);
+    }
+
+    input.close();
+    return responseContent.toByteArray();
+}
+
 
     public String getContentType(File file) {
         if (file == null || !file.exists() || file.isDirectory()) {
