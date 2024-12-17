@@ -36,24 +36,28 @@ public class HttpHandler extends Thread {
             System.out.println(firstLine);
             String[] request = firstLine.split(" ");
 
+            // get first header
             method = request[0];
             resource = request[1];
             version = request[2];
 
+            // get secondary headers
             do {
                 header = in.readLine();
                 System.out.println(header);
             } while (!header.isEmpty());
-            System.out.println("Request ended");
 
+            // get file stream
             File file = getFile(resource);
-            responseBody = getFileStream(file);
 
-            out.writeBytes("HTTP/1.1 "+ responseHeader + System.lineSeparator());
-            out.writeBytes("Content-Type: " + getContentType(file) + System.lineSeparator());
-            out.writeBytes("Content-Length: " + responseBody.length + System.lineSeparator());
-            out.writeBytes(System.lineSeparator());
-            out.write(responseBody);
+            if (file == null) {
+                sendResponse("301 Moved Permanently", null, null);
+            } else {
+                responseBody = getFileStream(file);
+
+                // build & send response
+                sendResponse("200 OK", responseBody, getContentType(file));
+            }
 
             // closing resources
             socket.close();
@@ -64,14 +68,37 @@ public class HttpHandler extends Thread {
 
     public File getFile(String resource) {
         String basePath = "htdocs/chartjs";
+        String path = basePath + resource;
+        File file = new File(path);
+    
+        // if resource ends with "/"
+        if (resource.endsWith("/")) {
 
-        return new File(
-            basePath +
-            (resource.equals("/")
-                ? "/index.html" 
-                : resource
-            )
-        );
+            // if directory exists, find "index.html"
+            if (file.exists() && file.isDirectory()) {
+                file = new File(file, "index.html");
+
+                if (file.exists()) {
+                    return file;
+                }
+            }
+        } else {
+            // if resource doesn't end with "/", look for a file with the same name
+            if (!resource.contains(".")) {
+                path += ".html";
+            }
+
+            file = new File(path);
+
+            if (file.exists() && !file.isDirectory()) {
+                return file;
+            } else {
+                return null;
+            }
+        }
+    
+        // if no file or directory is found, return null
+        return null;
     }
 
     public byte[] getFileStream(File file) throws IOException {
@@ -97,5 +124,29 @@ public class HttpHandler extends Thread {
         }
 
         return URLConnection.guessContentTypeFromName(file.getName());
+    }
+
+    public void sendResponse(String statusCode, byte[] responseBody, String contentType) throws IOException {
+        // send header
+        out.writeBytes("HTTP/1.1 " + statusCode + System.lineSeparator());
+
+        int len = -1;
+        switch (statusCode) {
+            case "301 Moved Permanently":
+                out.writeBytes("Location: " + resource + "/" + System.lineSeparator());
+                contentType = "0";
+                len = 0;
+                break;
+            case "200 OK":
+                len = responseBody.length;
+                break;
+            default:
+        }
+        
+        // send response
+        out.writeBytes("Content-Type: " + contentType + System.lineSeparator());
+        out.writeBytes("Content-Length: " + len + System.lineSeparator());
+        out.writeBytes(System.lineSeparator());
+        out.write(responseBody);
     }
 }
