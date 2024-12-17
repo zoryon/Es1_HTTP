@@ -9,6 +9,9 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.Socket;
 import java.net.URLConnection;
+import java.util.HashMap;
+import java.util.Map;
+
 import com.http.lib.FileResult;
 import com.http.lib.FileStatus;
 
@@ -122,38 +125,56 @@ public class HttpHandler extends Thread {
         try {
             byte[] content = readFile(file);
             String contentType = determineContentType(file);
-            sendResponse("200 OK", content, contentType);
+
+            // build response
+            Map<String, String> headers = new HashMap<>();
+            headers.put("Content-Type", contentType);
+    
+            sendResponse("200 OK", headers, content);
         } catch (IOException e) {
             sendError("500 Internal Server Error", "Failed to read the requested resource.");
         }
     }
 
-    private void sendResponse(String statusCode, byte[] body, String contentType) {
+    private void sendResponse(String statusCode, Map<String, String> headers, byte[] body) {
         try {
+            // headers
             out.writeBytes("HTTP/1.1 " + statusCode + "\r\n");
-            if (contentType != null) out.writeBytes("Content-Type: " + contentType + "\r\n");
-            if (body != null) out.writeBytes("Content-Length: " + body.length + "\r\n");
-            out.writeBytes("\r\n");
-            if (body != null) out.write(body);
-            out.flush();
+            
+            if (headers != null) {
+                for (Map.Entry<String, String> header : headers.entrySet()) {
+                    out.writeBytes(header.getKey() + ": " + header.getValue() + "\r\n");
+                }
+            }
+    
+            if (body != null) {
+                out.writeBytes("Content-Length: " + body.length + "\r\n");
+            }
+            
+            out.writeBytes("\r\n"); // end of headers
+            
+            if (body != null) {
+                out.write(body);
+            }
         } catch (IOException e) {
             e.printStackTrace();
         }
     }
 
     private void sendRedirect(String newLocation) {
-        try {
-            out.writeBytes("HTTP/1.1 301 Moved Permanently\r\n");
-            out.writeBytes("Location: " + newLocation + "\r\n");
-            out.writeBytes("\r\n");
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+        Map<String, String> headers = new HashMap<>();
+        headers.put("Location", newLocation);
+        sendResponse("301 Moved Permanently", headers, null);
     }
 
-    private void sendError(String statusCode, String message) {
-        String body = "<html><body><h1>" + statusCode + "</h1><p>" + message + "</p></body></html>";
-        sendResponse(statusCode, body.getBytes(), "text/html");
+    private void sendError(String statusCode, String message) {        
+        Map<String, String> headers = new HashMap<>();
+        headers.put("Content-Type", "text/html");
+
+        String bodyContent = "<html><body><h1>" + statusCode + "</h1><p>" + message + "</p></body></html>";
+        byte[] body = bodyContent.getBytes();
+
+        sendResponse(statusCode, headers, body);
     }
 
     private byte[] readFile(File file) throws IOException {
