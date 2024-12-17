@@ -21,8 +21,6 @@ public class HttpHandler extends Thread {
     String resource;
     String version;
 
-    private static final String BASE_PATH = "htdocs/chartjs";
-
     public HttpHandler(Socket socket) {
         this.socket = socket;
     }
@@ -42,7 +40,7 @@ public class HttpHandler extends Thread {
         }
     }
 
-    /** step 1: parse the HTTP request */
+    /** step 1: parse / analyse / get / fetch the HTTP request */
     private void parseRequest() throws IOException {
         String requestLine  = in.readLine();
         if (requestLine  == null || requestLine .isEmpty()) {
@@ -51,23 +49,23 @@ public class HttpHandler extends Thread {
 
         System.out.println("Request: " + requestLine );
 
-        String[] parts  = requestLine .split(" ");
-        if (parts .length != 3) {
+        String[] parts  = requestLine.split(" ");
+        if (parts.length != 3) {
             throw new IOException("Malformed HTTP request's header");
         }
 
-        method = parts [0];
-        resource = parts [1];
-        version = parts [2];
+        method = parts[0];
+        resource = parts[1];
+        version = parts[2];
 
-        // consume all headers
+        // consume all headers (as of now they are unnecessary)
         do {
             header = in.readLine();
             System.out.println(header);
         } while (!header.isEmpty());
     }
 
-    /** step 2: process the HTTP request */
+    /** step 2: process the HTTP request and send a response */
     private void processRequest() {
         FileResult result = determineFile(resource);
 
@@ -85,25 +83,29 @@ public class HttpHandler extends Thread {
     }
 
     private FileResult determineFile(String path) {
-        File file = new File(BASE_PATH + path);
+        File file = new File("htdocs/chartjs" + path);
 
-        // if resource is a directory but lacks a trailing "/"
+        // if resource is a directory but lacks a trailing "/" (doesn't end with "/")
         if (file.exists() && file.isDirectory() && !path.endsWith("/")) {
+            /* 
+             * this resource doesn't end with a "/",
+             * BUT a directory was found with name + trailing "/" --> should send a 301
+             */
             return new FileResult(null, FileStatus.DIRECTORY_NO_SLASH);
         }
 
-        // if directory find the relative index
+        // if a directory, find the relative index file
         if (path.endsWith("/")) {
             file = new File(file, "index.html");
             if (file.exists()) return new FileResult(file, FileStatus.FILE_FOUND);
         }
 
-        // if no extension, search for a file with any extension
+        // if no extension, search for a file with same name but with any extension
         if (!path.contains(".")) {
             File parent = file.getParentFile();
             if (parent != null && parent.exists()) {
-                final File searchFile = file;
-                File[] matches = parent.listFiles((dir, name) -> name.startsWith(searchFile.getName() + "."));
+                final File searchFile = file; // i got an error saying file should have been final
+                File[] matches = parent.listFiles((dir, name) -> name.startsWith(searchFile.getName() + ".")); // filter with callback function
                 if (matches != null && matches.length > 0) {
                     return new FileResult(matches[0], FileStatus.FILE_FOUND);
                 }
@@ -155,20 +157,22 @@ public class HttpHandler extends Thread {
     }
 
     private byte[] readFile(File file) throws IOException {
-        try (FileInputStream fis = new FileInputStream(file);
-             ByteArrayOutputStream buffer = new ByteArrayOutputStream()) {
-            byte[] data = new byte[8192];
-            int bytesRead;
-            while ((bytesRead = fis.read(data)) != -1) {
-                buffer.write(data, 0, bytesRead);
-            }
-            return buffer.toByteArray();
+        FileInputStream fis = new FileInputStream(file);
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        byte[] data = new byte[8192];
+
+        int bytesRead;
+        while ((bytesRead = fis.read(data)) != -1) {
+            buffer.write(data, 0, bytesRead);
         }
+
+        fis.close();
+        return buffer.toByteArray();
     }
 
     private String determineContentType(File file) {
         String contentType = URLConnection.guessContentTypeFromName(file.getName());
-        return contentType != null ? contentType : "application/octet-stream";
+        return contentType != null ? contentType : "unknown";
     }
 
     private void closeResources() {
