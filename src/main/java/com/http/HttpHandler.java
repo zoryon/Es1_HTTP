@@ -75,22 +75,21 @@ public class HttpHandler extends Thread {
     }
 
     public byte[] getFileStream(File file) throws IOException {
-    if (file == null || !file.exists() || file.isDirectory()) {
-        return "<html><body><h1>404 Not Found</h1></body></html>".getBytes();
+        if (file == null || !file.exists() || file.isDirectory()) {
+            return "<html><body><h1>404 Not Found</h1></body></html>".getBytes();
+        }
+
+        InputStream input = new FileInputStream(file);
+        byte[] buffer = new byte[8192];
+        int bytesRead;
+        ByteArrayOutputStream responseContent = new ByteArrayOutputStream();
+        while ((bytesRead = input.read(buffer)) != -1) {
+            responseContent.write(buffer, 0, bytesRead);
+        }
+
+        input.close();
+        return responseContent.toByteArray();
     }
-
-    InputStream input = new FileInputStream(file);
-    byte[] buffer = new byte[8192];
-    int bytesRead;
-    ByteArrayOutputStream responseContent = new ByteArrayOutputStream();
-    while ((bytesRead = input.read(buffer)) != -1) {
-        responseContent.write(buffer, 0, bytesRead);
-    }
-
-    input.close();
-    return responseContent.toByteArray();
-}
-
 
     public String getContentType(File file) {
         if (file == null || !file.exists() || file.isDirectory()) {
