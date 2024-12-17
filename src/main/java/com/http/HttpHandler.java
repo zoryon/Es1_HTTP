@@ -19,8 +19,6 @@ public class HttpHandler extends Thread {
     String method;
     String resource;
     String version;
-    String responseHeader;
-    byte[] responseBody;
 
     public HttpHandler(Socket socket) {
         this.socket = socket;
@@ -32,121 +30,157 @@ public class HttpHandler extends Thread {
             in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
             out = new DataOutputStream(socket.getOutputStream());
 
-            String firstLine = in.readLine();
-            System.out.println(firstLine);
-            String[] request = firstLine.split(" ");
+            parseRequest();
+            handleRequest();
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            closeResources();
+        }
+    }
 
-            // get first header
-            method = request[0];
-            resource = request[1];
-            version = request[2];
+    private void parseRequest() throws IOException {
+        String firstLine = in.readLine();
+        if (firstLine == null || firstLine.isEmpty()) {
+            throw new IOException("Empty HTTP request");
+        }
 
-            // get secondary headers
-            do {
-                header = in.readLine();
-                System.out.println(header);
-            } while (!header.isEmpty());
+        System.out.println("Request: " + firstLine);
+        String[] requestParts = firstLine.split(" ");
+        if (requestParts.length != 3) {
+            throw new IOException("Malformed HTTP request's header");
+        }
 
-            // get file stream
-            File file = getFile(resource);
+        method = requestParts[0];
+        resource = requestParts[1];
+        version = requestParts[2];
 
-            if (file == null) {
-                sendResponse("301 Moved Permanently", null, null);
-            } else {
-                responseBody = getFileStream(file);
+        // consume all headers
+        do {
+            header = in.readLine();
+            System.out.println(header);
+        } while (!header.isEmpty());
+    }
 
-                // build & send response
-                sendResponse("200 OK", responseBody, getContentType(file));
+    private void handleRequest() {
+        File file = getFile(resource);
+
+        if (file == null) {
+            // if the file does not exist and doesn't end with "/", send 401
+            if (!resource.endsWith("/")) {
+                sendErrorResponse("404 Not Found", "Resource not found.");
             }
+        } else {
+            serveFile(file);
+        }
+    }
 
-            // closing resources
-            socket.close();
+    private File getFile(String resourcePath) {
+        String basePath = "htdocs/chartjs";
+        File file = new File(basePath + resourcePath);
+
+        // if resource is a directory but lacks a trailing "/"
+        if (file.exists() && file.isDirectory() && !resourcePath.endsWith("/")) {
+            sendRedirectResponse(resourcePath + "/");
+            return null; // Stop further processing
+        }
+
+        // if directory find the relative index
+        if (resourcePath.endsWith("/")) {
+            file = new File(file, "index.html");
+            if (file.exists()) return file;
+        }
+
+        // if no extension, search for a file with any extension
+        if (!resourcePath.contains(".")) {
+            File parentDir = file.getParentFile();
+            String baseName = file.getName();
+            if (parentDir != null && parentDir.exists()) {
+                File[] matchingFiles = parentDir.listFiles((dir, name) -> name.startsWith(baseName + "."));
+                if (matchingFiles != null && matchingFiles.length > 0) {
+                    return matchingFiles[0];
+                }
+            }
+    
+            File indexFile = new File(file, "index.html");
+            if (indexFile.exists() && indexFile.isFile()) {
+                return indexFile;
+            }
+        }
+
+        // return the file directly if it exists
+        if (file.exists() && file.isFile()) {
+            return file;
+        }
+
+        return null;
+    }
+
+    private void serveFile(File file) {
+        try {
+            byte[] fileContent = getFileStream(file);
+            String contentType = getContentType(file);
+            sendResponse("200 OK", fileContent, contentType);
+        } catch (IOException e) {
+            sendErrorResponse("500 Internal Server Error", "Failed to read the resource.");
+        }
+    }
+
+    private byte[] getFileStream(File file) throws IOException {
+        ByteArrayOutputStream responseContent = new ByteArrayOutputStream();
+        try (InputStream input = new FileInputStream(file)) {
+            byte[] buffer = new byte[8192];
+            int bytesRead;
+            while ((bytesRead = input.read(buffer)) != -1) {
+                responseContent.write(buffer, 0, bytesRead);
+            }
+        }
+        return responseContent.toByteArray();
+    }
+
+    private String getContentType(File file) {
+        return URLConnection.guessContentTypeFromName(file.getName());
+    }
+
+    private void sendResponse(String statusCode, byte[] responseBody, String contentType) {
+        try {
+            out.writeBytes("HTTP/1.1 " + statusCode + "\r\n");
+            out.writeBytes("Content-Type: " + contentType + "\r\n");
+            out.writeBytes("Content-Length: " + responseBody.length + "\r\n");
+            out.writeBytes("\r\n");
+            out.write(responseBody);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void sendErrorResponse(String statusCode, String message) {
+        try {
+            String errorHtml = "<html><body><h1>" + statusCode + "</h1><p>" + message + "</p></body></html>";
+            byte[] responseBody = errorHtml.getBytes();
+            sendResponse(statusCode, responseBody, "text/html");
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    public File getFile(String resource) {
-        String basePath = "htdocs/chartjs";
-        String path = basePath + resource;
-        File file = new File(path);
-    
-        // if resource ends with "/"
-        if (resource.endsWith("/")) {
-
-            // if directory exists, find "index.html"
-            if (file.exists() && file.isDirectory()) {
-                file = new File(file, "index.html");
-
-                if (file.exists()) {
-                    return file;
-                }
-            }
-        } else {
-            // if resource doesn't end with "/", look for a file with the same name
-            if (!resource.contains(".")) {
-                path += ".html";
-            }
-
-            file = new File(path);
-
-            if (file.exists() && !file.isDirectory()) {
-                return file;
-            } else {
-                return null;
-            }
+    private void sendRedirectResponse(String newLocation) {
+        try {
+            out.writeBytes("HTTP/1.1 301 Moved Permanently\r\n");
+            out.writeBytes("Location: " + newLocation + "\r\n");
+            out.writeBytes("\r\n");
+        } catch (IOException e) {
+            e.printStackTrace();
         }
-    
-        // if no file or directory is found, return null
-        return null;
     }
 
-    public byte[] getFileStream(File file) throws IOException {
-        if (file == null || !file.exists() || file.isDirectory()) {
-            return "<html><body><h1>404 Not Found</h1></body></html>".getBytes();
+    private void closeResources() {
+        try {
+            if (in != null) in.close();
+            if (out != null) out.close();
+            if (socket != null && !socket.isClosed()) socket.close();
+        } catch (IOException e) {
+            e.printStackTrace();
         }
-
-        InputStream input = new FileInputStream(file);
-        byte[] buffer = new byte[8192];
-        int bytesRead;
-        ByteArrayOutputStream responseContent = new ByteArrayOutputStream();
-        while ((bytesRead = input.read(buffer)) != -1) {
-            responseContent.write(buffer, 0, bytesRead);
-        }
-
-        input.close();
-        return responseContent.toByteArray();
-    }
-
-    public String getContentType(File file) {
-        if (file == null || !file.exists() || file.isDirectory()) {
-            return "unknown";
-        }
-
-        return URLConnection.guessContentTypeFromName(file.getName());
-    }
-
-    public void sendResponse(String statusCode, byte[] responseBody, String contentType) throws IOException {
-        // send header
-        out.writeBytes("HTTP/1.1 " + statusCode + System.lineSeparator());
-
-        int len = -1;
-        switch (statusCode) {
-            case "301 Moved Permanently":
-                out.writeBytes("Location: " + resource + "/" + System.lineSeparator());
-                contentType = "0";
-                len = 0;
-                break;
-            case "200 OK":
-                len = responseBody.length;
-                break;
-            default:
-        }
-        
-        // send response
-        out.writeBytes("Content-Type: " + contentType + System.lineSeparator());
-        out.writeBytes("Content-Length: " + len + System.lineSeparator());
-        out.writeBytes(System.lineSeparator());
-        out.write(responseBody);
     }
 }
